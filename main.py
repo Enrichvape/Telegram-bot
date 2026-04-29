@@ -37,7 +37,7 @@ def handle(message):
         bot.send_message(chat_id, "Available:\n- Grape Ice\n- Strawberry\n- Mango")
 
     elif message.text == "📞 Contact":
-        bot.send_message(chat_id, "Contact: 011-60879707")
+        bot.send_message(chat_id, "Contact: 012-XXX XXXX")
 
     elif message.text == "⬅️ Back":
         start(message)
@@ -69,6 +69,5 @@ Alamat: {data['address']}
 
     bot.send_message(OWNER_ID, order_text)
     bot.send_message(chat_id, "Order berjaya dihantar 🔥")
-bot.send_message(OWNER_ID, "TEST SAMPAI TAK")
 
 bot.infinity_polling()
