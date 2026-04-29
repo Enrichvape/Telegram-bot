@@ -37,7 +37,7 @@ def handle(message):
         bot.send_message(chat_id, "Available:\n- Grape Ice\n- Strawberry\n- Mango")
 
     elif message.text == "📞 Contact":
-        bot.send_message(chat_id, "Contact: 012-XXX XXXX")
+        bot.send_message(chat_id, "Contact: 011-60879707")
 
     elif message.text == "⬅️ Back":
         start(message)
@@ -65,7 +65,7 @@ Alamat: {data['address']}
 """
 
     # 👉 GANTI DENGAN USER ID TELEGRAM KAU
-    OWNER_ID = 123456789
+    OWNER_ID = 8299633855
 
     bot.send_message(OWNER_ID, order_text)
     bot.send_message(chat_id, "Order berjaya dihantar 🔥")
