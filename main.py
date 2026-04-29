@@ -7,6 +7,11 @@ bot = telebot.TeleBot(TOKEN)
 
 user_data = {}
 
+# 👉 SETTING
+OWNER_ID = 8299633855
+WHATSAPP_NUMBER = "601160879707"
+PRICE = 95
+
 # START
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -29,20 +34,48 @@ def handle(message):
     elif message.text in ["Grape Ice", "Strawberry", "Mango"]:
         user_data[chat_id] = {"flavour": message.text}
 
-        bot.send_message(chat_id, f"Kau pilih {message.text}\nMasukkan nama:")
+        image_url = "https://imgur.com/a/QqYVm0N"
+
+        markup = types.InlineKeyboardMarkup()
+        wa_link = f"https://wa.me/01160879707"
+        markup.add(types.InlineKeyboardButton("📱 WhatsApp", url=wa_link))
+
+        bot.send_photo(
+            chat_id,
+            image_url,
+            caption=f"""
+🔥 {message.text} (Flavour Pati)
+💰 Harga: RM95
+⭐ Sedap & padu
+
+Masukkan nama:
+""",
+            reply_markup=markup
+        )
 
         bot.register_next_step_handler(message, get_name)
 
     elif message.text == "💨 Flavour":
-        bot.send_message(chat_id, "Available:\n- Grape Ice\n- Strawberry\n- Mango")
+        bot.send_message(chat_id, f"""
+🔥 FLAVOUR PATI 🔥
+- Grape Ice
+- Strawberry
+- Mango
+
+💰 RM95 sebotol
+""")
 
     elif message.text == "📞 Contact":
-        bot.send_message(chat_id, "Contact: 012-XXX XXXX")
+        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📱 WhatsApp", url=wa_link))
+
+        bot.send_message(chat_id, "Klik bawah untuk contact 🔥", reply_markup=markup)
 
     elif message.text == "⬅️ Back":
         start(message)
 
-# STEP 1: NAME
+# STEP 1
 def get_name(message):
     chat_id = message.chat.id
     user_data[chat_id]["name"] = message.text
@@ -50,7 +83,7 @@ def get_name(message):
     bot.send_message(chat_id, "Masukkan alamat:")
     bot.register_next_step_handler(message, get_address)
 
-# STEP 2: ADDRESS
+# STEP 2
 def get_address(message):
     chat_id = message.chat.id
     user_data[chat_id]["address"] = message.text
@@ -61,11 +94,9 @@ def get_address(message):
 🔥 ORDER BARU 🔥
 Nama: {data['name']}
 Flavour: {data['flavour']}
+Harga: RM{PRICE}
 Alamat: {data['address']}
 """
-
-    # 👉 GANTI DENGAN USER ID TELEGRAM KAU
-    OWNER_ID = 8299633855
 
     bot.send_message(OWNER_ID, order_text)
     bot.send_message(chat_id, "Order berjaya dihantar 🔥")
