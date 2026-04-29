@@ -69,5 +69,6 @@ Alamat: {data['address']}
 
     bot.send_message(OWNER_ID, order_text)
     bot.send_message(chat_id, "Order berjaya dihantar 🔥")
+bot.send_message(OWNER_ID, "TEST SAMPAI TAK")
 
 bot.infinity_polling()
