@@ -1,44 +1,50 @@
 import telebot
 import os
 from telebot import types
+from datetime import datetime
 from enum import Enum
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-# ================== SETTING ==================
+# ================== SETTINGS ==================
 OWNER_ID = 8299633855
-WHATSAPP_NUMBER = "601160879707"   # Tukar ikut nombor WhatsApp kamu
+WHATSAPP_NUMBER = "601160879707"
 PRICE = 95
 
-# States untuk conversation
-class UserState(Enum):
+# States
+class State(Enum):
     IDLE = 0
     CHOOSING_FLAVOUR = 1
-    ENTERING_NAME = 2
-    ENTERING_PHONE = 3
-    ENTERING_ADDRESS = 4
-    CONFIRMING_ORDER = 5
+    ENTER_NAME = 2
+    ENTER_PHONE = 3
+    ENTER_ADDRESS = 4
+    CONFIRM_ORDER = 5
 
-user_data = {}
-user_state = {}
+user_data = {}      # Simpan data order sementara
+user_state = {}     # Simpan state user
+user_orders = {}    # Simpan senarai order setiap user (chat_id: list of orders)
+
+FLAVOURS = ["Grape Ice", "Strawberry", "Mango", "Blueberry", "Watermelon"]  # Tambah flavour di sini
 
 # ================== KEYBOARDS ==================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("📦 Lai Order", "💨 Usha Lu Flavour")
-    markup.add("📞 Contact Admin")
+    markup.add("📦 Buat Order", "📋 Order Saya")
+    markup.add("💨 Flavour", "📞 Contact")
     return markup
 
 def flavour_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("Grape Ice", "Strawberry")
-    markup.add("Mango", "⬅️ Kembali")
+    for i in range(0, len(FLAVOURS), 2):
+        row = FLAVOURS[i:i+2]
+        markup.add(*row)
+    markup.add("⬅️ Kembali")
     return markup
 
 def cancel_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("❌ Batal Order")
+    markup.add("❌ Batal")
     return markup
 
 # ================== START ==================
@@ -46,139 +52,159 @@ def cancel_keyboard():
 def start(message):
     chat_id = message.chat.id
     user_data[chat_id] = {}
-    user_state[chat_id] = UserState.IDLE
+    user_state[chat_id] = State.IDLE
     
-    bot.send_message(
-        chat_id, 
-        "👋 Selamat datang ke **enRich Vape Shop** 🔥\n\n"
-        "Gerenti Murah And Pati Padu Teruokkk",
-        reply_markup=main_keyboard(),
-        parse_mode="Markdown"
-    )
+    welcome_text = "🔥 *Selamat datang ke Rich Vape Shop!* 🔥\n\n" \
+                   "Pilih menu di bawah untuk mula:"
+    
+    bot.send_message(chat_id, welcome_text, parse_mode="Markdown", reply_markup=main_keyboard())
 
-# ================== MAIN MENU HANDLER ==================
+# ================== MAIN HANDLER ==================
 @bot.message_handler(func=lambda m: True)
-def handle_message(message):
+def handle_all(message):
     chat_id = message.chat.id
-    text = message.text
+    text = message.text.strip()
 
-    # Reset state jika tekan Back atau Batal
-    if text in ["⬅️ Kembali", "❌ Batal Order"]:
-        user_data[chat_id] = {}
-        user_state[chat_id] = UserState.IDLE
+    if text == "❌ Batal":
+        reset_user(chat_id)
+        bot.send_message(chat_id, "✅ Order dibatalkan.", reply_markup=main_keyboard())
+        return
+
+    if text == "⬅️ Kembali":
+        reset_user(chat_id)
         start(message)
         return
 
-    if text == "📦 Lai Order":
-        user_state[chat_id] = UserState.CHOOSING_FLAVOUR
-        bot.send_message(chat_id, "Pilih flavour yang anda mahu:", reply_markup=flavour_keyboard())
+    if text == "📦 Buat Order":
+        user_state[chat_id] = State.CHOOSING_FLAVOUR
+        bot.send_message(chat_id, "Pilih flavour:", reply_markup=flavour_keyboard())
 
-    elif text == "💨 Usha Lu Flavour":
-        bot.send_message(
-            chat_id,
-            f"🔥 **FLAVOUR PATI** 🔥\n\n"
-            f"• Grape Ice\n"
-            f"• Strawberry\n"
-            f"• Mango\n\n"
-            f"💰 Harga: RM{PRICE} sebotol\n"
-            f"✅ Pati sedap & tahan lama",
-            parse_mode="Markdown"
-        )
+    elif text == "💨 Flavour":
+        flavours_list = "\n".join([f"• {f}" for f in FLAVOURS])
+        bot.send_message(chat_id, f"🔥 **Flavour Tersedia**\n\n{flavours_list}\n\n💰 RM{PRICE} / botol", parse_mode="Markdown")
 
-    elif text == "📞 Contact Admin":
-        wa_link = f"https://wa.me/01160879707"
+    elif text == "📞 Contact":
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("💬 Hubungi WhatsApp", url=wa_link))
-        
-        bot.send_message(chat_id, "Klik butang di bawah untuk hubungi admin:", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton("💬 WhatsApp Admin", url=f"https://wa.me/{WHATSAPP_NUMBER}"))
+        bot.send_message(chat_id, "Hubungi admin terus:", reply_markup=markup)
 
-    # Flavour selection
-    elif text in ["Grape Ice", "Strawberry", "Mango"]:
-        if user_state.get(chat_id) == UserState.CHOOSING_FLAVOUR:
-            user_data[chat_id] = {"flavour": text}
-            user_state[chat_id] = UserState.ENTERING_NAME
-            
-            bot.send_message(
-                chat_id, 
-                f"Anda pilih: **{text}**\n\n"
-                "Sila masukkan **nama penuh** anda:",
-                parse_mode="Markdown",
-                reply_markup=cancel_keyboard()
-            )
+    elif text == "📋 Order Saya":
+        show_user_orders(chat_id)
 
-    # ================== ORDER STEPS ==================
-    elif user_state.get(chat_id) == UserState.ENTERING_NAME:
-        user_data[chat_id]["name"] = text
-        user_state[chat_id] = UserState.ENTERING_PHONE
-        bot.send_message(chat_id, "Masukkan **nombor telefon** anda (contoh: 60123456789):", 
+    # Pilih Flavour
+    elif text in FLAVOURS and user_state.get(chat_id) == State.CHOOSING_FLAVOUR:
+        user_data[chat_id] = {"flavour": text, "price": PRICE}
+        user_state[chat_id] = State.ENTER_NAME
+        bot.send_message(chat_id, f"Anda pilih: **{text}**\n\nSila masukkan **Nama Penuh**:", 
                         parse_mode="Markdown", reply_markup=cancel_keyboard())
 
-    elif user_state.get(chat_id) == UserState.ENTERING_PHONE:
-        # Simple validation
+    # Step-by-step order
+    elif user_state.get(chat_id) == State.ENTER_NAME:
+        user_data[chat_id]["name"] = text
+        user_state[chat_id] = State.ENTER_PHONE
+        bot.send_message(chat_id, "Masukkan **No. Telefon** (contoh: 60123456789):", 
+                        parse_mode="Markdown", reply_markup=cancel_keyboard())
+
+    elif user_state.get(chat_id) == State.ENTER_PHONE:
         phone = text.replace(" ", "").replace("-", "")
-        if not phone.startswith("60") or len(phone) < 10:
-            bot.send_message(chat_id, "❌ Nombor telefon tidak sah.\n\nSila masukkan nombor yang betul (contoh: 60123456789)")
+        if len(phone) < 10 or not phone.startswith("60"):
+            bot.send_message(chat_id, "❌ Nombor telefon tidak sah. Sila masukkan semula (contoh: 60123456789)")
             return
-        
         user_data[chat_id]["phone"] = phone
-        user_state[chat_id] = UserState.ENTERING_ADDRESS
-        bot.send_message(chat_id, "Masukkan **alamat penghantaran** lengkap:", 
-                        reply_markup=cancel_keyboard())
+        user_state[chat_id] = State.ENTER_ADDRESS
+        bot.send_message(chat_id, "Masukkan **Alamat Penghantaran** lengkap:", reply_markup=cancel_keyboard())
 
-    elif user_state.get(chat_id) == UserState.ENTERING_ADDRESS:
+    elif user_state.get(chat_id) == State.ENTER_ADDRESS:
         user_data[chat_id]["address"] = text
-        user_state[chat_id] = UserState.CONFIRMING_ORDER
-        
-        data = user_data[chat_id]
-        
-        confirmation_text = f"""
-🔥 **KOMPOM ORDER** 🔥
+        user_state[chat_id] = State.CONFIRM_ORDER
+        show_confirmation(chat_id)
 
-Nama          : {data['name']}
-Flavour       : {data['flavour']}
-Harga         : RM{PRICE}
-No. Telefon   : {data['phone']}
-Alamat        : {data['address']}
+    elif user_state.get(chat_id) == State.CONFIRM_ORDER and text.upper() in ["YA", "YES", "OK", "HANTAR"]:
+        save_and_send_order(message)
+    else:
+        bot.send_message(chat_id, "Sila ikut arahan atau tekan butang menu.")
 
-Betul ke order ni? 
-Balas *YA* untuk hantar order.
-        """
-        
-        bot.send_message(chat_id, confirmation_text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
+# ================== HELPER FUNCTIONS ==================
+def show_confirmation(chat_id):
+    data = user_data[chat_id]
+    text = f"""
+🔥 **KONFIRMASI ORDER** 🔥
 
-    elif user_state.get(chat_id) == UserState.CONFIRMING_ORDER:
-        if text.upper() in ["YA", "YES", "OK", "HANTAR"]:
-            data = user_data[chat_id]
-            
-            order_text = f"""
-🔥 **ORDER BARU DITERIMA** 🔥
+Flavour   : {data['flavour']}
+Harga     : RM{data['price']}
+Nama      : {data['name']}
+Telefon   : {data['phone']}
+Alamat    : {data['address']}
 
-📌 Nama       : {data['name']}
-📌 Flavour    : {data['flavour']}
-💰 Harga      : RM{PRICE}
-📱 Telefon    : {data['phone']}
-📍 Alamat     : {data['address']}
-⏰ Masa       : {message.date}
+Balas *YA* jika semua betul.
+"""
+    bot.send_message(chat_id, text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
 
-Dari: @{message.from_user.username if message.from_user.username else message.from_user.id}
-            """
-            
-            bot.send_message(OWNER_ID, order_text)
-            
-            bot.send_message(
-                chat_id, 
-                "✅ *Order anda berjaya dihantar!* 🔥\n\n"
-                "Admin akan hubungi anda sebentar lagi.",
-                parse_mode="Markdown"
-            )
-            
-            # Reset
-            user_data[chat_id] = {}
-            user_state[chat_id] = UserState.IDLE
-            bot.send_message(chat_id, "Terima kasih kerana order di Rich Vape Shop! 🙏", reply_markup=main_keyboard())
-        else:
-            bot.send_message(chat_id, "Sila balas *YA* jika betul, atau tekan *❌ Batal Order* jika nak batalkan.")
+def save_and_send_order(message):
+    chat_id = message.chat.id
+    data = user_data[chat_id]
+    
+    order_id = f"RVS{int(datetime.now().timestamp())}"
+    
+    order_info = {
+        "order_id": order_id,
+        "flavour": data['flavour'],
+        "price": data['price'],
+        "name": data['name'],
+        "phone": data['phone'],
+        "address": data['address'],
+        "status": "Pending",
+        "date": datetime.now().strftime("%d/%m/%Y %H:%M")
+    }
+
+    # Simpan order user
+    if chat_id not in user_orders:
+        user_orders[chat_id] = []
+    user_orders[chat_id].append(order_info)
+
+    # Hantar ke Owner
+    admin_text = f"""
+🔥 **ORDER BARU** #{order_id}
+
+Nama     : {data['name']}
+Flavour  : {data['flavour']}
+Harga    : RM{data['price']}
+Telefon  : {data['phone']}
+Alamat   : {data['address']}
+Tarikh   : {order_info['date']}
+User ID  : {chat_id}
+    """
+    bot.send_message(OWNER_ID, admin_text)
+
+    # Reply ke customer
+    bot.send_message(chat_id, f"""
+✅ *Order #{order_id} berjaya dihantar!*
+
+Admin akan hubungi anda melalui telefon/whatsApp dalam masa terdekat.
+Terima kasih kerana berbelanja di Rich Vape Shop 🔥
+""", parse_mode="Markdown")
+
+    reset_user(chat_id)
+    bot.send_message(chat_id, "Kembali ke menu utama:", reply_markup=main_keyboard())
+
+def show_user_orders(chat_id):
+    if chat_id not in user_orders or not user_orders[chat_id]:
+        bot.send_message(chat_id, "Anda belum ada sebarang order lagi.")
+        return
+
+    text = "📋 **Senarai Order Anda**\n\n"
+    for order in user_orders[chat_id]:
+        text += f"🔖 Order ID: `{order['order_id']}`\n"
+        text += f"Flavour: {order['flavour']}\n"
+        text += f"Status : {order['status']}\n"
+        text += f"Tarikh : {order['date']}\n\n"
+
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+def reset_user(chat_id):
+    user_data[chat_id] = {}
+    user_state[chat_id] = State.IDLE
 
 # ================== RUN BOT ==================
-print("Rich Vape Bot is running...")
+print("🚀 Rich Vape Shop Bot is running...")
 bot.infinity_polling()
