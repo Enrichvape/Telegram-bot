@@ -2,8 +2,9 @@ import telebot
 import os
 from telebot import types
 from datetime import datetime
-from enum import Enum
+import pytz
 import random
+from enum import Enum
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
@@ -23,6 +24,9 @@ No Akaun: 162040050328
 
 FLAVOURS = ["Grape Ice", "Strawberry", "Mango", "Blueberry", "Watermelon"]
 
+# Timezone Malaysia
+MY_TZ = pytz.timezone('Asia/Kuala_Lumpur')
+
 # States
 class State(Enum):
     IDLE = 0
@@ -40,9 +44,14 @@ user_orders = {}   # {chat_id: [order1, order2, ...]}
 
 # ================== HELPER FUNCTIONS ==================
 def generate_order_id():
-    timestamp = datetime.now().strftime("%y%m%d")
+    now = datetime.now(MY_TZ)
+    timestamp = now.strftime("%y%m%d")
     random_num = random.randint(1000, 9999)
     return f"RVS{timestamp}{random_num}"
+
+def get_current_datetime_str():
+    """Return tarikh dan masa mengikut waktu Malaysia"""
+    return datetime.now(MY_TZ).strftime("%d/%m/%Y %H:%M")
 
 def get_delivery_fee(address):
     addr_lower = address.lower()
@@ -140,7 +149,6 @@ def handle_message(message):
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
 
-    # Cancel & Back buttons
     if text == "❌ Batal Order":
         reset_user(chat_id)
         bot.send_message(chat_id, "✅ Order telah dibatalkan.", reply_markup=main_keyboard())
@@ -151,7 +159,6 @@ def handle_message(message):
         start(message)
         return
 
-    # Main Menu
     if text == "📦 Buat Order Baru":
         user_state[chat_id] = State.CHOOSING_FLAVOUR
         bot.send_message(chat_id, "💨 *Pilih Flavour Vape anda:*", parse_mode="Markdown", reply_markup=flavour_keyboard())
@@ -168,7 +175,7 @@ def handle_message(message):
         markup.add(types.InlineKeyboardButton("💬 Chat WhatsApp Admin", url=f"https://wa.me/{WHATSAPP_NUMBER}"))
         bot.send_message(chat_id, "Hubungi admin terus:", reply_markup=markup)
 
-    # Flavour Selection
+    # Pilih Flavour
     elif text in FLAVOURS and user_state.get(chat_id) == State.CHOOSING_FLAVOUR:
         user_data[chat_id] = {"flavour": text, "chat_id": chat_id}
         user_state[chat_id] = State.ENTER_QUANTITY
@@ -261,7 +268,7 @@ def create_order(message):
         "phone": data['phone'],
         "address": data['address'],
         "status": "Pending",
-        "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "date": get_current_datetime_str(),      # ← Waktu Malaysia yang betul
         "chat_id": chat_id,
         "payment_proof": None
     }
@@ -307,7 +314,6 @@ def handle_payment_proof(message):
     latest_order = user_orders.get(chat_id, [{}])[-1]
     order_id = latest_order.get('order_id', "Unknown")
 
-    # Forward bukti ke admin
     bot.forward_message(OWNER_ID, chat_id, message.message_id)
     bot.send_message(OWNER_ID, f"💰 Bukti bayaran diterima untuk Order `{order_id}`")
 
@@ -316,7 +322,7 @@ def handle_payment_proof(message):
     reset_user(chat_id)
     bot.send_message(chat_id, "Kembali ke menu utama:", reply_markup=main_keyboard())
 
-# ================== ADMIN & USER ORDER DISPLAY ==================
+# ================== DISPLAY ORDERS ==================
 def show_user_orders(chat_id):
     if not user_orders.get(chat_id):
         bot.send_message(chat_id, "Anda belum ada order lagi.")
@@ -380,11 +386,9 @@ Sudah Dibayar   : {paid}
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
 def reset_user(chat_id):
-    if chat_id in user_data:
-        user_data[chat_id] = {}
-    if chat_id in user_state:
-        user_state[chat_id] = State.IDLE
+    user_data[chat_id] = {}
+    user_state[chat_id] = State.IDLE
 
 # ================== RUN BOT ==================
-print("🚀 Rich Vape Shop Bot v2.0 (Improved) sedang berjalan...")
+print("🚀 Rich Vape Shop Bot v2.1 (Timezone Fixed) sedang berjalan...")
 bot.infinity_polling()
