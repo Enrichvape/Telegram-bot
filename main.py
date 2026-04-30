@@ -1,5 +1,6 @@
 import telebot
 import os
+import json
 from telebot import types
 from datetime import datetime
 import pytz
@@ -27,6 +28,38 @@ FLAVOURS = ["Grape Ice", "Strawberry", "Mango", "Blueberry", "Watermelon"]
 # Timezone Malaysia
 MY_TZ = pytz.timezone('Asia/Kuala_Lumpur')
 
+# ================== PRODUCT IMAGES (file_id) ==================
+PRODUCT_IMAGES = {
+    "Grape Ice": None,
+    "Strawberry": None,
+    "Mango": None,
+    "Blueberry": None,
+    "Watermelon": None,
+}
+
+# Load gambar dari JSON jika ada
+def load_product_photos():
+    global PRODUCT_IMAGES
+    try:
+        if os.path.exists("product_photos.json"):
+            with open("product_photos.json", "r", encoding="utf-8") as f:
+                saved_photos = json.load(f)
+                PRODUCT_IMAGES.update(saved_photos)
+            print("✅ Gambar produk dimuat dari product_photos.json")
+    except Exception as e:
+        print(f"⚠️ Gagal load product_photos.json: {e}")
+
+def save_product_photo(flavour, file_id):
+    """Simpan file_id gambar produk"""
+    PRODUCT_IMAGES[flavour] = file_id
+    print(f"✅ Gambar untuk {flavour} disimpan. file_id: {file_id}")
+    
+    try:
+        with open("product_photos.json", "w", encoding="utf-8") as f:
+            json.dump(PRODUCT_IMAGES, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ Gagal simpan product_photos.json: {e}")
+
 # States
 class State(Enum):
     IDLE = 0
@@ -50,7 +83,6 @@ def generate_order_id():
     return f"RVS{timestamp}{random_num}"
 
 def get_current_datetime_str():
-    """Return tarikh dan masa mengikut waktu Malaysia"""
     return datetime.now(MY_TZ).strftime("%d/%m/%Y %H:%M")
 
 def get_delivery_fee(address):
@@ -70,6 +102,7 @@ def flavour_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     for i in range(0, len(FLAVOURS), 2):
         markup.add(*FLAVOURS[i:i+2])
+    markup.add("🖼️ Lihat Semua Gambar Produk")
     markup.add("⬅️ Kembali ke Menu")
     return markup
 
@@ -104,7 +137,7 @@ Pilih menu di bawah untuk mula:
     )
 
 # ================== ADMIN COMMANDS ==================
-@bot.message_handler(commands=['admin', 'orders', 'pending', 'stats', 'broadcast', 'update', 'myorders'])
+@bot.message_handler(commands=['admin', 'orders', 'pending', 'stats', 'broadcast', 'update', 'myorders', 'setphoto'])
 def admin_commands(message):
     if message.chat.id != OWNER_ID:
         bot.send_message(message.chat.id, "⛔ Anda tiada akses admin.")
@@ -138,10 +171,41 @@ def admin_commands(message):
             update_order_status(order_id, new_status, message.chat.id)
         except:
             bot.send_message(OWNER_ID, 
-                "Cara guna:\n`/update RVS1234567890 Paid`\n\nStatus yang dibenarkan: Paid, Shipped, Delivered, Cancelled")
+                "Cara guna:\n`/update RVS1234567890 Paid`\n\nStatus: Paid, Shipped, Delivered, Cancelled")
 
     elif cmd == 'myorders':
         show_all_orders(message.chat.id)
+
+    elif cmd == 'setphoto':
+        try:
+            flavour = message.text.split(maxsplit=1)[1]
+            if flavour not in FLAVOURS:
+                bot.send_message(OWNER_ID, f"❌ Flavour tidak sah!\nFlavour yang ada: {', '.join(FLAVOURS)}")
+                return
+            bot.send_message(OWNER_ID, f"✅ Sila hantar **gambar** untuk flavour **{flavour}** sekarang.")
+            user_data[OWNER_ID] = {"setting_photo_for": flavour}
+        except:
+            bot.send_message(OWNER_ID, "Cara guna:\n`/setphoto Nama Flavour`\nContoh: `/setphoto Grape Ice`")
+
+# ================== HANDLE PHOTO (Admin Upload + Payment Proof) ==================
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    chat_id = message.chat.id
+
+    # Admin sedang upload gambar produk
+    if chat_id == OWNER_ID and user_data.get(OWNER_ID, {}).get("setting_photo_for"):
+        flavour = user_data[OWNER_ID]["setting_photo_for"]
+        file_id = message.photo[-1].file_id   # Ambil kualiti tertinggi
+        
+        save_product_photo(flavour, file_id)
+        
+        bot.send_message(chat_id, f"✅ Gambar untuk **{flavour}** berjaya disimpan!", parse_mode="Markdown")
+        user_data[OWNER_ID].pop("setting_photo_for", None)
+        return
+
+    # Customer hantar bukti bayaran
+    elif user_state.get(chat_id) == State.WAITING_PAYMENT_PROOF:
+        handle_payment_proof(message)
 
 # ================== MAIN HANDLER ==================
 @bot.message_handler(func=lambda m: True)
@@ -175,11 +239,36 @@ def handle_message(message):
         markup.add(types.InlineKeyboardButton("💬 Chat WhatsApp Admin", url=f"https://wa.me/{WHATSAPP_NUMBER}"))
         bot.send_message(chat_id, "Hubungi admin terus:", reply_markup=markup)
 
-    # Pilih Flavour
+    # === PILIH FLAVOUR + GAMBAR ===
     elif text in FLAVOURS and user_state.get(chat_id) == State.CHOOSING_FLAVOUR:
         user_data[chat_id] = {"flavour": text, "chat_id": chat_id}
         user_state[chat_id] = State.ENTER_QUANTITY
-        bot.send_message(chat_id, f"✅ Anda pilih: **{text}**\n\nBerapa botol yang anda mahu?", parse_mode="Markdown", reply_markup=quantity_keyboard())
+        
+        flavour = text
+        file_id = PRODUCT_IMAGES.get(flavour)
+        caption = f"✅ Anda pilih: **{flavour}**\n\nBerapa botol yang anda mahu? (1-10)"
+
+        if file_id:
+            try:
+                bot.send_photo(chat_id, file_id, caption=caption, parse_mode="Markdown", reply_markup=quantity_keyboard())
+            except:
+                bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=quantity_keyboard())
+        else:
+            bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=quantity_keyboard())
+
+    # Lihat Semua Gambar
+    elif text == "🖼️ Lihat Semua Gambar Produk" and user_state.get(chat_id) == State.CHOOSING_FLAVOUR:
+        sent = False
+        for flavour in FLAVOURS:
+            file_id = PRODUCT_IMAGES.get(flavour)
+            if file_id:
+                try:
+                    bot.send_photo(chat_id, file_id, caption=f"**{flavour}**", parse_mode="Markdown")
+                    sent = True
+                except:
+                    pass
+        if not sent:
+            bot.send_message(chat_id, "⚠️ Belum ada gambar produk yang dimuat naik.\n\nAdmin boleh upload guna `/setphoto Nama Flavour`")
 
     # Quantity
     elif text.isdigit() and 1 <= int(text) <= 10 and user_state.get(chat_id) == State.ENTER_QUANTITY:
@@ -213,10 +302,7 @@ def handle_message(message):
         create_order(message)
 
     elif user_state.get(chat_id) == State.WAITING_PAYMENT_PROOF:
-        if message.photo:
-            handle_payment_proof(message)
-        else:
-            bot.send_message(chat_id, "📸 Sila hantar *gambar bukti bayaran* anda.")
+        bot.send_message(chat_id, "📸 Sila hantar *gambar bukti bayaran* anda.")
 
     else:
         bot.send_message(chat_id, "Gunakan butang di bawah atau ikut arahan.", reply_markup=main_keyboard())
@@ -224,6 +310,9 @@ def handle_message(message):
 # ================== CONFIRMATION & ORDER CREATION ==================
 def show_confirmation(chat_id):
     data = user_data[chat_id]
+    flavour = data['flavour']
+    file_id = PRODUCT_IMAGES.get(flavour)
+
     delivery = get_delivery_fee(data["address"])
     subtotal = data["price"]
     total = subtotal + delivery
@@ -232,7 +321,7 @@ def show_confirmation(chat_id):
 ✅ *KONFIRMASI ORDER*
 
 **Item:**
-{data['quantity']}x {data['flavour']} 
+{data['quantity']}x {flavour} 
 Harga     : RM{subtotal}
 
 **Penghantaran:**
@@ -247,6 +336,14 @@ Alamat : {data['address']}
 
 Balas *YA* jika semua maklumat betul.
 """
+
+    if file_id:
+        try:
+            bot.send_photo(chat_id, file_id, caption=text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
+            return
+        except:
+            pass
+
     bot.send_message(chat_id, text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
 
 def create_order(message):
@@ -268,7 +365,7 @@ def create_order(message):
         "phone": data['phone'],
         "address": data['address'],
         "status": "Pending",
-        "date": get_current_datetime_str(),      # ← Waktu Malaysia yang betul
+        "date": get_current_datetime_str(),
         "chat_id": chat_id,
         "payment_proof": None
     }
@@ -386,9 +483,4 @@ Sudah Dibayar   : {paid}
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
 def reset_user(chat_id):
-    user_data[chat_id] = {}
-    user_state[chat_id] = State.IDLE
-
-# ================== RUN BOT ==================
-print("🚀 Rich Vape Shop Bot v2.1 (Timezone Fixed) sedang berjalan...")
-bot.infinity_polling()
+    if chat_id in user_data:
