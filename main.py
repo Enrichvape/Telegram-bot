@@ -482,5 +482,14 @@ Sudah Dibayar   : {paid}
 """
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
+# ================== RESET USER ==================
 def reset_user(chat_id):
-    if chat_id in user_data:
+    """Reset semua data dan state user"""
+    user_data[chat_id] = {}
+    user_state[chat_id] = State.IDLE
+
+# ================== RUN BOT ==================
+if __name__ == "__main__":
+    load_product_photos()   # Load gambar dari JSON
+    print("🚀 Rich Vape Shop Bot v2.2 (Gambar Produk + file_id) sedang berjalan...")
+    bot.infinity_polling()
