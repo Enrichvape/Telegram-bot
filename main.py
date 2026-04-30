@@ -61,8 +61,7 @@ def save_order_to_db(order):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     cur.execute('''
-        INSERT OR REPLACE INTO orders 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         order['order_id'], order['chat_id'], order['flavour'], order['quantity'],
         order['subtotal'], order['delivery'], order['total'], order['name'],
@@ -88,18 +87,24 @@ def get_pending_orders():
     return rows
 
 # ================== PRODUCT IMAGES ==================
-PRODUCT_IMAGES = {f: None for f in FLAVOURS}
+PRODUCT_IMAGES = {
+    "Grape Ice": None,
+    "Strawberry": None,
+    "Mango": None,
+    "Blueberry": None,
+    "Watermelon": None,
+}
 
 def load_product_photos():
     global PRODUCT_IMAGES
     try:
         if os.path.exists("product_photos.json"):
             with open("product_photos.json", "r", encoding="utf-8") as f:
-                saved = json.load(f)
-                PRODUCT_IMAGES.update(saved)
+                saved_photos = json.load(f)
+                PRODUCT_IMAGES.update(saved_photos)
             print("✅ Gambar produk dimuat dari product_photos.json")
     except Exception as e:
-        print(f"⚠️ Gagal load gambar: {e}")
+        print(f"⚠️ Gagal load product_photos.json: {e}")
 
 def save_product_photo(flavour, file_id):
     PRODUCT_IMAGES[flavour] = file_id
@@ -123,6 +128,7 @@ class State(Enum):
 
 user_data = {}
 user_state = {}
+user_orders = {}   # Untuk cache sementara
 
 # ================== HELPER FUNCTIONS ==================
 def generate_order_id():
@@ -140,7 +146,7 @@ def get_delivery_fee(address):
         return DELIVERY_SABAH_SARAWAK
     return DELIVERY_SEMENANJUNG
 
-# ================== AUTO REMINDER & AUTO CANCEL ==================
+# ================== AUTO REMINDER + AUTO CANCEL (Background) ==================
 def auto_payment_checker():
     while True:
         try:
@@ -155,17 +161,22 @@ def auto_payment_checker():
                     if elapsed >= timedelta(hours=24):
                         # Auto Cancel
                         update_order_status_in_db(order_id, "Cancelled")
-                        bot.send_message(chat_id, f"❌ Order `{order_id}` telah **dibatalkan secara automatik** kerana tiada bayaran dalam 24 jam.")
-                        print(f"Order {order_id} dibatalkan secara auto.")
+                        try:
+                            bot.send_message(chat_id, f"❌ Order `{order_id}` telah **dibatalkan secara automatik** kerana tiada bayaran dalam 24 jam.")
+                        except:
+                            pass
+                        print(f"[AUTO CANCEL] Order {order_id} dibatalkan")
 
                     elif elapsed >= timedelta(hours=12):
-                        # Reminder
-                        bot.send_message(chat_id, f"⏰ **Peringatan Bayaran**\n\nOrder `{order_id}` anda masih **Pending**.\nSila buat bayaran secepat mungkin sebelum dibatalkan dalam 24 jam dari masa order dibuat.")
-                        print(f"Reminder dihantar untuk order {order_id}")
+                        # Payment Reminder
+                        try:
+                            bot.send_message(chat_id, f"⏰ **Peringatan Bayaran**\n\nOrder `{order_id}` anda masih **Pending**.\nSila buat bayaran secepat mungkin sebelum dibatalkan secara automatik.")
+                        except:
+                            pass
+                        print(f"[REMINDER] Dihantar untuk order {order_id}")
 
                 except:
                     continue
-
         except Exception as e:
             print(f"Auto checker error: {e}")
 
@@ -225,21 +236,35 @@ def admin_commands(message):
     elif cmd == 'stats':
         show_stats(message.chat.id)
     elif cmd == 'broadcast':
-        # ... (kekal sama seperti sebelum ini)
-        pass
+        # kod broadcast kekal
+        try:
+            text = message.text.split(maxsplit=1)[1]
+            sent = 0
+            for chat_id in list(user_orders.keys()):
+                try:
+                    bot.send_message(chat_id, f"📢 *PENGUMUMAN DARI RICH VAPE*\n\n{text}", parse_mode="Markdown")
+                    sent += 1
+                except:
+                    pass
+            bot.send_message(OWNER_ID, f"✅ Broadcast berjaya kepada *{sent}* pengguna.")
+        except:
+            bot.send_message(OWNER_ID, "Cara guna: `/broadcast Teks anda`")
     elif cmd == 'update':
-        # ... (kekal sama)
-        pass
+        try:
+            _, order_id, new_status = message.text.split(maxsplit=2)
+            update_order_status(order_id, new_status, message.chat.id)
+        except:
+            bot.send_message(OWNER_ID, "Cara guna:\n`/update RVSxxxxxxx Paid`")
     elif cmd == 'setphoto':
         try:
             flavour = message.text.split(maxsplit=1)[1]
             if flavour not in FLAVOURS:
-                bot.send_message(OWNER_ID, f"❌ Flavour tidak sah!\nFlavour yang ada: {', '.join(FLAVOURS)}")
+                bot.send_message(OWNER_ID, f"❌ Flavour tidak sah!\nFlavour: {', '.join(FLAVOURS)}")
                 return
-            bot.send_message(OWNER_ID, f"✅ Sila hantar **gambar** untuk flavour **{flavour}** sekarang.")
+            bot.send_message(OWNER_ID, f"✅ Sila hantar gambar untuk **{flavour}** sekarang.")
             user_data[OWNER_ID] = {"setting_photo_for": flavour}
         except:
-            bot.send_message(OWNER_ID, "Cara guna:\n`/setphoto Nama Flavour`\nContoh: `/setphoto Grape Ice`")
+            bot.send_message(OWNER_ID, "Cara guna: `/setphoto Grape Ice`")
 
 # ================== HANDLE PHOTO ==================
 @bot.message_handler(content_types=['photo'])
@@ -257,7 +282,7 @@ def handle_photo(message):
     elif user_state.get(chat_id) == State.WAITING_PAYMENT_PROOF:
         handle_payment_proof(message)
 
-# ================== MAIN HANDLER ==================
+# ================== MAIN HANDLER (sama seperti sebelum ini) ==================
 @bot.message_handler(func=lambda m: True)
 def handle_message(message):
     chat_id = message.chat.id
@@ -308,20 +333,42 @@ def handle_message(message):
     elif text == "🖼️ Lihat Semua Gambar Produk" and user_state.get(chat_id) == State.CHOOSING_FLAVOUR:
         sent = False
         for flavour in FLAVOURS:
-            file_id = PRODUCT_IMAGES.get(flavour)
-            if file_id:
+            if PRODUCT_IMAGES.get(flavour):
                 try:
-                    bot.send_photo(chat_id, file_id, caption=f"**{flavour}**", parse_mode="Markdown")
+                    bot.send_photo(chat_id, PRODUCT_IMAGES[flavour], caption=f"**{flavour}**", parse_mode="Markdown")
                     sent = True
                 except:
                     pass
         if not sent:
             bot.send_message(chat_id, "⚠️ Belum ada gambar produk yang dimuat naik.")
 
-    # Quantity, Name, Phone, Address, Confirmation, Create Order (sama seperti sebelum ini)
-    # ... (Saya ringkaskan untuk ruang, tapi anda boleh copy dari kod lama anda)
+    # Quantity
+    elif text.isdigit() and 1 <= int(text) <= 10 and user_state.get(chat_id) == State.ENTER_QUANTITY:
+        qty = int(text)
+        user_data[chat_id]["quantity"] = qty
+        user_data[chat_id]["price"] = PRICE_PER_BOTTLE * qty
+        user_state[chat_id] = State.ENTER_NAME
+        bot.send_message(chat_id, f"✅ *{qty} botol* **{user_data[chat_id]['flavour']}**\n\nMasukkan **Nama Penuh** anda:", parse_mode="Markdown", reply_markup=cancel_keyboard())
 
-    # Untuk lengkapkan, sila gantikan bahagian create_order dengan yang di bawah:
+    # Order Flow (Name, Phone, Address, Confirmation)
+    elif user_state.get(chat_id) == State.ENTER_NAME:
+        user_data[chat_id]["name"] = text
+        user_state[chat_id] = State.ENTER_PHONE
+        bot.send_message(chat_id, "📱 Masukkan **No. Telefon** (contoh: 60123456789):", parse_mode="Markdown", reply_markup=cancel_keyboard())
+
+    elif user_state.get(chat_id) == State.ENTER_PHONE:
+        phone = text.replace(" ", "").replace("-", "").replace("+", "")
+        if len(phone) < 10 or not phone.startswith("60"):
+            bot.send_message(chat_id, "❌ Nombor telefon tidak sah. Sila masukkan semula.")
+            return
+        user_data[chat_id]["phone"] = phone
+        user_state[chat_id] = State.ENTER_ADDRESS
+        bot.send_message(chat_id, "📍 Masukkan **Alamat Penghantaran** lengkap:", reply_markup=cancel_keyboard())
+
+    elif user_state.get(chat_id) == State.ENTER_ADDRESS:
+        user_data[chat_id]["address"] = text
+        user_state[chat_id] = State.CONFIRM_ORDER
+        show_confirmation(chat_id)
 
     elif user_state.get(chat_id) == State.CONFIRM_ORDER and text.upper() in ["YA", "YES", "OK", "HANTAR", "CONFIRM"]:
         create_order(message)
@@ -332,10 +379,39 @@ def handle_message(message):
     else:
         bot.send_message(chat_id, "Gunakan butang di bawah atau ikut arahan.", reply_markup=main_keyboard())
 
-# ================== CONFIRMATION & CREATE ORDER ==================
+# ================== CONFIRMATION ==================
 def show_confirmation(chat_id):
-    # ... (sama seperti kod lama anda)
-    pass   # Gantikan dengan kod confirmation lama anda
+    data = user_data[chat_id]
+    flavour = data['flavour']
+    file_id = PRODUCT_IMAGES.get(flavour)
+    delivery = get_delivery_fee(data["address"])
+    subtotal = data["price"]
+    total = subtotal + delivery
+
+    text = f"""
+✅ *KONFIRMASI ORDER*
+
+**Item:** {data['quantity']}x {flavour}
+Harga     : RM{subtotal}
+
+**Penghantaran:** RM{delivery}
+**Jumlah:** *RM{total}*
+
+**Pembeli:**
+Nama   : {data['name']}
+Telefon: {data['phone']}
+Alamat : {data['address']}
+
+Balas *YA* jika betul.
+"""
+
+    if file_id:
+        try:
+            bot.send_photo(chat_id, file_id, caption=text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
+            return
+        except:
+            pass
+    bot.send_message(chat_id, text.strip(), parse_mode="Markdown", reply_markup=cancel_keyboard())
 
 def create_order(message):
     chat_id = message.chat.id
@@ -362,35 +438,64 @@ def create_order(message):
         "payment_proof": None
     }
 
+    if chat_id not in user_orders:
+        user_orders[chat_id] = []
+    user_orders[chat_id].append(order)
+
     save_order_to_db(order)
 
     # Hantar ke Admin
-    admin_text = f"""
-🛒 *ORDER BARU DITERIMA!*
+    bot.send_message(OWNER_ID, f"""
+🛒 *ORDER BARU!*
+Order ID: `{order_id}`
+Item: {data['quantity']}x {data['flavour']}
+Total: RM{total}
+Pembeli: {data['name']}
+""", parse_mode="Markdown")
 
-**Order ID:** `{order_id}`
-**Item:** {data['quantity']}x {data['flavour']}
-**Total:** RM{total}
-**Pembeli:** {data['name']}
-    """
-    bot.send_message(OWNER_ID, admin_text, parse_mode="Markdown")
+    # Balas customer
+    bot.send_message(chat_id, f"""
+✅ *Order #{order_id} berjaya!*
 
-    # Reply ke customer
-    customer_text = f"""
-✅ *Order #{order_id} berjaya dihantar!*
+Jumlah: *RM{total}*
 
-Jumlah yang perlu dibayar: *RM{total}*
-
-Sila buat pembayaran ke:
+Sila bayar ke:
 {BANK_INFO}
 
-Selepas bayar, hantar gambar bukti bayaran di sini.
-    """
-    bot.send_message(chat_id, customer_text, parse_mode="Markdown")
+Hantar gambar bukti bayaran di sini selepas bayar.
+""", parse_mode="Markdown")
 
     user_state[chat_id] = State.WAITING_PAYMENT_PROOF
 
-# ================== RESET USER ==================
+def handle_payment_proof(message):
+    chat_id = message.chat.id
+    latest_order = user_orders.get(chat_id, [{}])[-1]
+    order_id = latest_order.get('order_id', "Unknown")
+
+    bot.forward_message(OWNER_ID, chat_id, message.message_id)
+    bot.send_message(OWNER_ID, f"💰 Bukti bayaran diterima untuk Order `{order_id}`")
+
+    bot.send_message(chat_id, "✅ Bukti bayaran dihantar ke admin. Terima kasih!")
+    reset_user(chat_id)
+    bot.send_message(chat_id, "Kembali ke menu utama:", reply_markup=main_keyboard())
+
+# ================== DISPLAY & UPDATE ==================
+def show_user_orders(chat_id):
+    if not user_orders.get(chat_id):
+        bot.send_message(chat_id, "Anda belum ada order.")
+        return
+    # ... (boleh diupgrade nanti dari DB)
+
+def show_all_orders(chat_id, pending_only=False):
+    bot.send_message(chat_id, "Fungsi ini masih menggunakan memory cache.")
+
+def update_order_status(order_id, new_status, admin_id):
+    update_order_status_in_db(order_id, new_status)
+    bot.send_message(admin_id, f"Status order `{order_id}` dikemaskini ke **{new_status}**")
+
+def show_stats(chat_id):
+    bot.send_message(chat_id, "Statistik akan ditambah kemudian.")
+
 def reset_user(chat_id):
     user_data[chat_id] = {}
     user_state[chat_id] = State.IDLE
@@ -400,8 +505,8 @@ if __name__ == "__main__":
     init_db()
     load_product_photos()
     
-    # Jalankan auto reminder & cancel di background
+    # Mulakan auto reminder & cancel
     threading.Thread(target=auto_payment_checker, daemon=True).start()
     
-    print("🚀 Rich Vape Shop Bot v2.3 (SQLite + Auto Reminder + Auto Cancel 24h) sedang berjalan...")
+    print("🚀 Rich Vape Shop Bot v2.3 (Auto Reminder 12 jam + Auto Cancel 24 jam) sedang berjalan...")
     bot.infinity_polling()
